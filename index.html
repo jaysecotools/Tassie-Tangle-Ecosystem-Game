@@ -199,6 +199,17 @@
       font-weight: bold;
       margin: 10px 0;
     }
+    #level-display {
+      font-size: 1.1em;
+      margin-bottom: 10px;
+      color: #1b5e20;
+    }
+    #total-score {
+      font-size: 1.1em;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #1b5e20;
+    }
     #turn-counter {
       position: absolute;
       top: -25px;
@@ -266,6 +277,40 @@
     #tutorial ol {
       padding-left: 20px;
     }
+    #level-up-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      color: white;
+      font-size: 1.5em;
+      text-align: center;
+      display: none;
+    }
+    #level-up-content {
+      background: rgba(255,255,255,0.9);
+      padding: 30px;
+      border-radius: 15px;
+      color: #1b5e20;
+      max-width: 500px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    #level-up-screen h2 {
+      margin-top: 0;
+      color: #1b5e20;
+    }
+    #level-up-screen button {
+      margin-top: 20px;
+      font-size: 1.2em;
+      padding: 10px 20px;
+    }
   </style>
 </head>
 <body>
@@ -281,18 +326,20 @@
       <li><strong>Connect them to resources</strong> they need (water 💧 or sun ☀️) by clicking the resource</li>
       <li>Paths will automatically grow between them if there's a clear route</li>
       <li>Use <strong>tools</strong> to build bridges 🌉 (over obstacles) or clear weeds 🌾</li>
-      <li>Manage your ecosystem before time runs out!</li>
+      <li>Complete each level before time runs out to advance!</li>
     </ol>
   </div>
 
   <div id="game-container">
     <div id="board-container">
-      <div id="turn-counter">Turn: <span id="turn-count">1</span>/20</div>
+      <div id="turn-counter">Turn: <span id="turn-count">1</span>/<span id="max-turns">20</span></div>
       <div id="board"></div>
     </div>
     
     <div id="sidebar">
-      <div id="score-display">🏆 Ecosystem Health: <span id="score">0</span>%</div>
+      <div id="level-display">🌿 Level: <span id="level">1</span></div>
+      <div id="total-score">🏆 Total Score: <span id="total-score-value">0</span></div>
+      <div id="score-display">🌱 Ecosystem Health: <span id="score">0</span>%</div>
       <div class="progress-container">
         <div id="health-bar" class="progress-bar"></div>
       </div>
@@ -330,12 +377,22 @@
     </div>
   </div>
 
+  <div id="level-up-screen">
+    <div id="level-up-content">
+      <h2>Level Complete! 🎉</h2>
+      <p>You restored the ecosystem to 100% health!</p>
+      <p>Level <span id="completed-level">1</span> Score: <span id="level-score">0</span></p>
+      <p>Total Score: <span id="new-total-score">0</span></p>
+      <button onclick="startNextLevel()">Continue to Level <span id="next-level">2</span> →</button>
+    </div>
+  </div>
+
   <script>
     // ================
     // GAME CONFIG
     // ================
     const BOARD_SIZE = 8;
-    const MAX_TURNS = 20;
+    const BASE_TURNS = 20;
     const SPECIES = [
       { 
         emoji: '🌿', 
@@ -392,6 +449,10 @@
     let clearCooldown = 0;
     let connections = [];
     let multiplier = 1;
+    let level = 1;
+    let totalScore = 0;
+    let levelScore = 0;
+    let maxTurns = BASE_TURNS;
 
     // ================
     // INITIALIZATION
@@ -402,6 +463,7 @@
       board = [];
       selectedTile = null;
       score = 0;
+      levelScore = 0;
       turn = 1;
       gameActive = true;
       discoveredSpecies = [];
@@ -409,9 +471,14 @@
       lastClearTurn = -5;
       connections = [];
       multiplier = 1;
+      
+      // Adjust difficulty based on level
+      maxTurns = Math.max(10, BASE_TURNS - Math.floor(level / 2));
+      
       updateScore();
       updateTurnCounter();
       updateCooldowns();
+      updateLevelDisplay();
       
       // Create tiles
       for (let y = 0; y < BOARD_SIZE; y++) {
@@ -435,25 +502,28 @@
       // Place game elements with smart placement
       placeWithPathways();
       renderSpeciesList();
-      showMessage("Welcome! Select a native plant, then connect it to resources it needs.", false);
+      showMessage(`Level ${level}: Connect plants to resources!`, false);
       updateResourceCounts();
     }
 
     function placeWithPathways() {
-      // Place water and sun in connected clusters
-      placeCluster('water', '💧', 3, 3);
-      placeCluster('sun', '☀️', 3, 3);
+      // Place water and sun in connected clusters (fewer as level increases)
+      const resourceClusters = Math.max(2, 4 - Math.floor(level / 3));
+      placeCluster('water', '💧', resourceClusters, 3);
+      placeCluster('sun', '☀️', resourceClusters, 3);
       
-      // Place plants near their required resources
+      // Place plants near their required resources (more as level increases)
+      const plantsPerSpecies = 1 + Math.floor(level / 2);
       SPECIES.forEach(species => {
         const neededResources = species.needs;
         neededResources.forEach(resource => {
-          placeNearResource('native', species.emoji, 2, resource);
+          placeNearResource('native', species.emoji, plantsPerSpecies, resource);
         });
       });
 
-      // Place weeds away from resources
-      placeRandom('weed', getRandomThreat().emoji, 4, true);
+      // Place weeds (more as level increases)
+      const initialWeeds = 3 + level;
+      placeRandom('weed', getRandomThreat().emoji, initialWeeds, true);
     }
 
     function placeCluster(type, emoji, clusters, clusterSize) {
@@ -697,6 +767,9 @@
       if (needsMet >= species.needs.length) {
         // Plant is fully connected
         multiplier += 0.2;
+        levelScore += species.points * multiplier;
+        totalScore += species.points * multiplier;
+        updateTotalScore();
         showMessage(`Great job! ${species.name} is thriving! Multiplier: x${multiplier.toFixed(1)}`, false);
       }
     }
@@ -910,28 +983,28 @@
       updateTurnCounter();
       updateCooldowns();
       
-      // Weeds spread
-      spreadWeeds();
+      // Weeds spread (faster at higher levels)
+      const weedSpreadRate = Math.min(0.2 + (level / 10) + (turn / 40), 0.7);
+      spreadWeeds(weedSpreadRate);
       
-      // Random events
-      if (turn > 3 && Math.random() < 0.3) triggerRandomEvent();
+      // Random events (more frequent at higher levels)
+      if (turn > 3 && Math.random() < 0.3 + (level * 0.02)) triggerRandomEvent();
       
       // Check win/lose
       checkGameState();
       
       // Respawn resources periodically
-      if (turn % 3 === 0) respawnResources();
+      if (turn % (4 - Math.floor(level / 5)) === 0) respawnResources();
       
       showMessage(`Turn ${turn} started. Connect more plants!`, false);
     }
 
-    function spreadWeeds() {
+    function spreadWeeds(spreadRate) {
       const newWeeds = [];
-      const weedSpreadRate = Math.min(0.2 + (turn / 40), 0.6); // Increases over time
       
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
-          if (board[y][x].type === 'weed' && Math.random() < weedSpreadRate) {
+          if (board[y][x].type === 'weed' && Math.random() < spreadRate) {
             const directions = [
               {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
             ].sort(() => Math.random() - 0.5);
@@ -1052,11 +1125,12 @@
         {
           name: 'Wildfire',
           effect: () => {
-            // Destroy some paths
+            // Destroy some paths (more at higher levels)
+            const destroyChance = 0.2 + (level * 0.02);
             let pathsDestroyed = 0;
             for (let y = 0; y < BOARD_SIZE; y++) {
               for (let x = 0; x < BOARD_SIZE; x++) {
-                if (board[y][x].type === 'path' && Math.random() < 0.3) {
+                if (board[y][x].type === 'path' && Math.random() < destroyChance) {
                   convertTile(x, y, 'empty', '');
                   pathsDestroyed++;
                 }
@@ -1066,6 +1140,16 @@
             checkGameState();
           },
           chance: 0.2
+        },
+        {
+          name: 'Invasive Species',
+          effect: () => {
+            // Add more weeds (more at higher levels)
+            const newWeeds = 1 + Math.floor(level / 2);
+            placeRandom('weed', getRandomThreat().emoji, newWeeds);
+            showMessage(`⚠️ Invasive species spread ${newWeeds} new weeds!`, true);
+          },
+          chance: 0.3
         }
       ];
       
@@ -1089,7 +1173,6 @@
       // Check connected plants
       let connectedPlants = 0;
       let totalPlants = 0;
-      let totalPoints = 0;
       
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
@@ -1111,7 +1194,6 @@
             
             if (needsMet >= species.needs.length) {
               connectedPlants++;
-              totalPoints += species.points * multiplier;
             }
           }
         }
@@ -1127,11 +1209,31 @@
       // Win/lose conditions
       if (score === 100) {
         gameActive = false;
-        showMessage(`🎉 You restored the ecosystem! All plants are thriving! Final score: ${Math.round(totalPoints)}`, false);
-      } else if (turn >= MAX_TURNS) {
+        levelComplete();
+      } else if (turn >= maxTurns) {
         gameActive = false;
-        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem. Final score: ${Math.round(totalPoints)}`, true);
+        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem. Total Score: ${totalScore}`, true);
       }
+    }
+
+    function levelComplete() {
+      // Calculate bonus points for remaining turns
+      const bonusPoints = (maxTurns - turn) * 5 * level;
+      levelScore += bonusPoints;
+      totalScore += bonusPoints;
+      
+      // Show level complete screen
+      document.getElementById('completed-level').textContent = level;
+      document.getElementById('level-score').textContent = levelScore;
+      document.getElementById('new-total-score').textContent = totalScore;
+      document.getElementById('next-level').textContent = level + 1;
+      document.getElementById('level-up-screen').style.display = 'flex';
+    }
+
+    function startNextLevel() {
+      level++;
+      document.getElementById('level-up-screen').style.display = 'none';
+      initGame();
     }
 
     function isConnected(x1, y1, x2, y2) {
@@ -1212,11 +1314,20 @@
         score < 30 ? '#d32f2f' : score < 70 ? '#ff8f00' : '#2e7d32';
     }
 
+    function updateTotalScore() {
+      document.getElementById('total-score-value').textContent = totalScore;
+    }
+
+    function updateLevelDisplay() {
+      document.getElementById('level').textContent = level;
+      document.getElementById('max-turns').textContent = maxTurns;
+    }
+
     function updateTurnCounter() {
       document.getElementById('turn-count').textContent = turn;
       const counter = document.getElementById('turn-counter');
       counter.style.backgroundColor = 
-        turn > MAX_TURNS - 5 ? 'rgba(211,47,47,0.8)' : 'rgba(0,0,0,0.7)';
+        turn > maxTurns - 5 ? 'rgba(211,47,47,0.8)' : 'rgba(0,0,0,0.7)';
     }
 
     function updateCooldowns() {
@@ -1272,6 +1383,8 @@
     }
 
     function resetGame() {
+      level = 1;
+      totalScore = 0;
       initGame();
       showMessage("Game reset! Connect plants to resources.", false);
     }
