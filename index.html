@@ -96,6 +96,9 @@
       animation: pulse 1.5s infinite;
       box-shadow: 0 0 0 4px #ffee58, 0 0 20px #ffeb3b;
     }
+    .tile.connected {
+      box-shadow: 0 0 0 3px #4caf50, 0 0 15px rgba(76, 175, 80, 0.5);
+    }
     #sidebar {
       background: rgba(255,255,255,0.9);
       padding: 20px;
@@ -241,12 +244,45 @@
       width: 0%;
       transition: width 0.3s;
     }
+    .connection-line {
+      position: absolute;
+      background-color: #4caf50;
+      z-index: 10;
+      transform-origin: left center;
+    }
+    #tutorial {
+      background: rgba(255,255,255,0.9);
+      padding: 15px;
+      border-radius: 10px;
+      max-width: 800px;
+      margin: 20px auto;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      text-align: left;
+    }
+    #tutorial h3 {
+      margin-top: 0;
+      color: #1b5e20;
+    }
+    #tutorial ol {
+      padding-left: 20px;
+    }
   </style>
 </head>
 <body>
   <div id="header">
     <h1>🌿 Tasmanian Tangle</h1>
     <p id="subtitle">Restore Tasmania's fragile ecosystems!</p>
+  </div>
+
+  <div id="tutorial">
+    <h3>How to Play:</h3>
+    <ol>
+      <li><strong>Select native plants</strong> by clicking on them (green tiles)</li>
+      <li><strong>Connect them to resources</strong> they need (water 💧 or sun ☀️) by clicking the resource</li>
+      <li>Paths will automatically grow between them if there's a clear route</li>
+      <li>Use <strong>tools</strong> to build bridges 🌉 (over obstacles) or clear weeds 🌾</li>
+      <li>Manage your ecosystem before time runs out!</li>
+    </ol>
   </div>
 
   <div id="game-container">
@@ -275,12 +311,10 @@
       <div id="abilities">
         <h3>Tools:</h3>
         <div class="ability">
-          <button id="bridge-btn" onclick="useTool('bridge')">🌉 Build Bridge</button>
-          <span id="bridge-cooldown" class="cooldown"></span>
+          <button id="bridge-btn" onclick="useTool('bridge')">🌉 Build Bridge <span id="bridge-cooldown" class="cooldown"></span></button>
         </div>
         <div class="ability">
-          <button id="clear-btn" onclick="useTool('clear')">🔄 Clear Weeds</button>
-          <span id="clear-cooldown" class="cooldown"></span>
+          <button id="clear-btn" onclick="useTool('clear')">🔄 Clear Weeds <span id="clear-cooldown" class="cooldown"></span></button>
         </div>
       </div>
       
@@ -308,28 +342,32 @@
         name: 'Tasmanian Blue Gum', 
         needs: ['water'], 
         desc: 'Iconic tree that koalas depend on',
-        rarity: 1
+        rarity: 1,
+        points: 10
       },
       { 
         emoji: '🌸', 
         name: 'Leatherwood', 
         needs: ['water', 'sun'], 
         desc: 'Vital for native honey production',
-        rarity: 2
+        rarity: 2,
+        points: 20
       },
       { 
         emoji: '🌲', 
         name: 'Huon Pine', 
         needs: ['water'], 
         desc: 'One of the oldest living tree species',
-        rarity: 3
+        rarity: 3,
+        points: 15
       },
       { 
         emoji: '🍂', 
         name: 'Waratah', 
         needs: ['sun'], 
         desc: 'Tasmania\'s floral emblem',
-        rarity: 1
+        rarity: 1,
+        points: 10
       }
     ];
     
@@ -352,6 +390,8 @@
     let lastClearTurn = -5;
     let bridgeCooldown = 0;
     let clearCooldown = 0;
+    let connections = [];
+    let multiplier = 1;
 
     // ================
     // INITIALIZATION
@@ -367,6 +407,8 @@
       discoveredSpecies = [];
       lastBridgeTurn = -3;
       lastClearTurn = -5;
+      connections = [];
+      multiplier = 1;
       updateScore();
       updateTurnCounter();
       updateCooldowns();
@@ -384,7 +426,8 @@
           board[y][x] = { 
             type: 'empty', 
             element: tile,
-            revealed: false
+            revealed: false,
+            connected: false
           };
         }
       }
@@ -392,13 +435,14 @@
       // Place game elements with smart placement
       placeWithPathways();
       renderSpeciesList();
-      showMessage("Welcome! Connect native plants to resources.", false);
+      showMessage("Welcome! Select a native plant, then connect it to resources it needs.", false);
+      updateResourceCounts();
     }
 
     function placeWithPathways() {
       // Place water and sun in connected clusters
-      placeCluster('water', '💧', 3, 2);
-      placeCluster('sun', '☀️', 3, 2);
+      placeCluster('water', '💧', 3, 3);
+      placeCluster('sun', '☀️', 3, 3);
       
       // Place plants near their required resources
       SPECIES.forEach(species => {
@@ -409,7 +453,7 @@
       });
 
       // Place weeds away from resources
-      placeRandom('weed', getRandomThreat().emoji, 3, true);
+      placeRandom('weed', getRandomThreat().emoji, 4, true);
     }
 
     function placeCluster(type, emoji, clusters, clusterSize) {
@@ -521,6 +565,11 @@
       if (type === 'sun') {
         board[y][x].element.style.animation = `float 3s ease-in-out ${Math.random() * 2}s infinite`;
       }
+      
+      // Update connected status
+      if (type === 'native' || type === 'water' || type === 'sun') {
+        board[y][x].connected = false;
+      }
     }
 
     // ================
@@ -533,7 +582,14 @@
       
       // Select native plant
       if (tile.type === 'native') {
-        if (selectedTile) selectedTile.element.classList.remove('selected');
+        if (selectedTile) {
+          selectedTile.element.classList.remove('selected');
+          if (selectedTile.x === x && selectedTile.y === y) {
+            selectedTile = null;
+            showMessage("Plant deselected.", false);
+            return;
+          }
+        }
         selectedTile = { 
           x, y, 
           element: tile.element,
@@ -547,7 +603,7 @@
           renderSpeciesList();
           showMessage(`Discovered: ${selectedTile.species.name}! ${selectedTile.species.desc}`, false);
         } else {
-          showMessage(`Selected: ${selectedTile.species.name}. Connect to ${selectedTile.species.needs.join(' and ')}.`, false);
+          showMessage(`Selected: ${selectedTile.species.name}. Needs: ${selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ')}.`, false);
         }
       } 
       // Connect to resource
@@ -558,7 +614,7 @@
             selectedTile = null;
           }
         } else {
-          showMessage(`This plant doesn't need ${tile.type}!`, true);
+          showMessage(`This plant doesn't need ${tile.type}! It needs ${selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ')}.`, true);
         }
       }
       // Use bridge
@@ -568,18 +624,33 @@
           selectedTile = null;
         }
       }
+      // Clicked empty tile with plant selected
+      else if (selectedTile && tile.type === 'empty') {
+        showMessage(`First connect to a needed resource (${selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' or ')})`, true);
+      }
     }
 
     function connectTiles(x1, y1, x2, y2) {
       // Check if connection is possible
       if (!canConnect(x1, y1, x2, y2)) {
-        showMessage("Cannot connect these tiles!", true);
+        showMessage("Cannot connect these tiles! Path is blocked.", true);
         return false;
       }
 
       // Draw path with animation
       const path = getConnectionPath(x1, y1, x2, y2);
       if (!path) return false;
+
+      // Check if this connection already exists
+      const connectionKey = `${x1},${y1}-${x2},${y2}`;
+      const reverseKey = `${x2},${y2}-${x1},${y1}`;
+      if (connections.includes(connectionKey) || connections.includes(reverseKey)) {
+        showMessage("These are already connected!", true);
+        return false;
+      }
+
+      // Add to connections
+      connections.push(connectionKey);
 
       path.forEach(({x, y}, i) => {
         setTimeout(() => {
@@ -589,9 +660,45 @@
         }, i * 100);
       });
 
-      showMessage("🌱 Connection growing...", false);
-      checkGameState();
+      // Mark both ends as connected
+      setTimeout(() => {
+        board[y1][x1].connected = true;
+        board[y1][x1].element.classList.add('connected');
+        board[y2][x2].connected = true;
+        board[y2][x2].element.classList.add('connected');
+        
+        // Check if plant has all needs met
+        checkPlantNeeds(x1, y1);
+        
+        showMessage("🌱 Connection successful!", false);
+        checkGameState();
+      }, path.length * 100 + 200);
+
       return true;
+    }
+
+    function checkPlantNeeds(x, y) {
+      if (board[y][x].type !== 'native') return;
+      
+      const species = findSpecies(board[y][x].element.textContent);
+      let needsMet = 0;
+      
+      for (let ty = 0; ty < BOARD_SIZE; ty++) {
+        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+          if (board[ty][tx].type === 'water' && species.needs.includes('water')) {
+            if (isConnected(x, y, tx, ty)) needsMet++;
+          }
+          if (board[ty][tx].type === 'sun' && species.needs.includes('sun')) {
+            if (isConnected(x, y, tx, ty)) needsMet++;
+          }
+        }
+      }
+      
+      if (needsMet >= species.needs.length) {
+        // Plant is fully connected
+        multiplier += 0.2;
+        showMessage(`Great job! ${species.name} is thriving! Multiplier: x${multiplier.toFixed(1)}`, false);
+      }
     }
 
     function canConnect(x1, y1, x2, y2) {
@@ -612,30 +719,40 @@
       // Vertical then horizontal
       if (hasClearPath(x1, y1, x1, y2) && hasClearPath(x1, y2, x2, y2)) {
         // Vertical segment
-        const startY = Math.min(y1, y2);
-        const endY = Math.max(y1, y2);
-        for (let y = startY + 1; y < endY; y++) {
+        const yStart = y1 < y2 ? y1 + 1 : y1 - 1;
+        const yEnd = y1 < y2 ? y2 : y2 + 1;
+        const yStep = y1 < y2 ? 1 : -1;
+        
+        for (let y = yStart; y !== yEnd; y += yStep) {
           path.push({x: x1, y});
         }
+        
         // Horizontal segment
-        const startX = Math.min(x1, x2);
-        const endX = Math.max(x1, x2);
-        for (let x = startX + 1; x < endX; x++) {
+        const xStart = x1 < x2 ? x1 + 1 : x1 - 1;
+        const xEnd = x1 < x2 ? x2 : x2 + 1;
+        const xStep = x1 < x2 ? 1 : -1;
+        
+        for (let x = xStart; x !== xEnd; x += xStep) {
           path.push({x, y: y2});
         }
       }
       // Horizontal then vertical
       else if (hasClearPath(x1, y1, x2, y1) && hasClearPath(x2, y1, x2, y2)) {
         // Horizontal segment
-        const startX = Math.min(x1, x2);
-        const endX = Math.max(x1, x2);
-        for (let x = startX + 1; x < endX; x++) {
+        const xStart = x1 < x2 ? x1 + 1 : x1 - 1;
+        const xEnd = x1 < x2 ? x2 : x2 + 1;
+        const xStep = x1 < x2 ? 1 : -1;
+        
+        for (let x = xStart; x !== xEnd; x += xStep) {
           path.push({x, y: y1});
         }
+        
         // Vertical segment
-        const startY = Math.min(y1, y2);
-        const endY = Math.max(y1, y2);
-        for (let y = startY + 1; y < endY; y++) {
+        const yStart = y1 < y2 ? y1 + 1 : y1 - 1;
+        const yEnd = y1 < y2 ? y2 : y2 + 1;
+        const yStep = y1 < y2 ? 1 : -1;
+        
+        for (let y = yStart; y !== yEnd; y += yStep) {
           path.push({x: x2, y});
         }
       }
@@ -693,7 +810,7 @@
       
       // Check if plant needs this resource
       if (!selectedTile.species.needs.includes(resourceTile.type)) {
-        showMessage(`This plant doesn't need ${resourceTile.type}!`, true);
+        showMessage(`This plant doesn't need ${resourceTile.type}! It needs ${selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ')}.`, true);
         return false;
       }
       
@@ -702,6 +819,9 @@
       const path2 = getConnectionPath(x2, y2, resourceTile.x, resourceTile.y);
       
       if (path1 && path2) {
+        // Add to connections
+        connections.push(`${x1},${y1}-${resourceTile.x},${resourceTile.y}`);
+        
         // Animate first path
         path1.forEach(({x, y}, i) => {
           setTimeout(() => {
@@ -720,12 +840,22 @@
           }, (path1.length + i) * 100);
         });
         
-        showMessage("Connected through bridge!", false);
-        checkGameState();
+        // Mark as connected
+        setTimeout(() => {
+          board[y1][x1].connected = true;
+          board[y1][x1].element.classList.add('connected');
+          board[resourceTile.y][resourceTile.x].connected = true;
+          board[resourceTile.y][resourceTile.x].element.classList.add('connected');
+          
+          checkPlantNeeds(x1, y1);
+          showMessage("Connected through bridge!", false);
+          checkGameState();
+        }, (path1.length + path2.length) * 100 + 200);
+        
         return true;
       }
       
-      showMessage("Cannot connect through this bridge!", true);
+      showMessage("Cannot connect through this bridge! Path is blocked.", true);
       return false;
     }
 
@@ -784,18 +914,20 @@
       spreadWeeds();
       
       // Random events
-      if (turn > 5 && Math.random() < 0.4) triggerRandomEvent();
+      if (turn > 3 && Math.random() < 0.3) triggerRandomEvent();
       
       // Check win/lose
       checkGameState();
       
       // Respawn resources periodically
-      if (turn % 4 === 0) respawnResources();
+      if (turn % 3 === 0) respawnResources();
+      
+      showMessage(`Turn ${turn} started. Connect more plants!`, false);
     }
 
     function spreadWeeds() {
       const newWeeds = [];
-      const weedSpreadRate = Math.min(0.3 + (turn / 50), 0.7); // Increases over time
+      const weedSpreadRate = Math.min(0.2 + (turn / 40), 0.6); // Increases over time
       
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
@@ -834,9 +966,40 @@
       const sunCount = countResources('sun');
       const respawnType = waterCount <= sunCount ? 'water' : 'sun';
       
-      const {x, y} = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
-      convertTile(x, y, respawnType, respawnType === 'water' ? '💧' : '☀️');
-      showMessage(`💧 A new ${respawnType} source emerged!`, false);
+      // Try to place near existing resources
+      let placed = false;
+      const resources = [];
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+          if (board[y][x].type === respawnType) resources.push({x, y});
+        }
+      }
+      
+      if (resources.length > 0) {
+        const {x: rx, y: ry} = resources[Math.floor(Math.random() * resources.length)];
+        const directions = [
+          {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
+        ].sort(() => Math.random() - 0.5);
+        
+        for (const dir of directions) {
+          const nx = rx + dir.dx;
+          const ny = ry + dir.dy;
+          if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && 
+              board[ny][nx].type === 'empty') {
+            convertTile(nx, ny, respawnType, respawnType === 'water' ? '💧' : '☀️');
+            placed = true;
+            break;
+          }
+        }
+      }
+      
+      // Fallback to random placement
+      if (!placed) {
+        const {x, y} = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
+        convertTile(x, y, respawnType, respawnType === 'water' ? '💧' : '☀️');
+      }
+      
+      showMessage(`A new ${respawnType} source emerged!`, false);
       updateResourceCounts();
     }
 
@@ -853,7 +1016,7 @@
               updateResourceCounts();
             }
           },
-          chance: 0.6
+          chance: 0.5
         },
         {
           name: 'Drought',
@@ -871,18 +1034,62 @@
               updateResourceCounts();
             }
           },
-          chance: 0.4
+          chance: 0.3
+        },
+        {
+          name: 'Sunny Break',
+          effect: () => {
+            const emptyTiles = getEmptyTiles();
+            if (emptyTiles.length > 0) {
+              const {x, y} = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
+              convertTile(x, y, 'sun', '☀️');
+              showMessage("☀️ Sunshine created a new sunny patch!", false);
+              updateResourceCounts();
+            }
+          },
+          chance: 0.5
+        },
+        {
+          name: 'Wildfire',
+          effect: () => {
+            // Destroy some paths
+            let pathsDestroyed = 0;
+            for (let y = 0; y < BOARD_SIZE; y++) {
+              for (let x = 0; x < BOARD_SIZE; x++) {
+                if (board[y][x].type === 'path' && Math.random() < 0.3) {
+                  convertTile(x, y, 'empty', '');
+                  pathsDestroyed++;
+                }
+              }
+            }
+            showMessage(`🔥 Wildfire destroyed ${pathsDestroyed} paths!`, true);
+            checkGameState();
+          },
+          chance: 0.2
         }
       ];
       
-      const event = events.find(e => Math.random() < e.chance) || events[0];
-      event.effect();
+      // Select random event weighted by chance
+      let total = 0;
+      const randomValue = Math.random();
+      let selectedEvent = events[0];
+      
+      for (const event of events) {
+        total += event.chance;
+        if (randomValue <= total) {
+          selectedEvent = event;
+          break;
+        }
+      }
+      
+      selectedEvent.effect();
     }
 
     function checkGameState() {
       // Check connected plants
       let connectedPlants = 0;
       let totalPlants = 0;
+      let totalPoints = 0;
       
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
@@ -902,22 +1109,28 @@
               }
             }
             
-            if (needsMet >= species.needs.length) connectedPlants++;
+            if (needsMet >= species.needs.length) {
+              connectedPlants++;
+              totalPoints += species.points * multiplier;
+            }
           }
         }
       }
       
       // Update score
-      score = Math.floor((connectedPlants / totalPlants) * 100);
-      updateScore();
+      const newScore = Math.floor((connectedPlants / totalPlants) * 100);
+      if (newScore !== score) {
+        score = newScore;
+        updateScore();
+      }
       
       // Win/lose conditions
       if (score === 100) {
         gameActive = false;
-        showMessage("🎉 You restored the ecosystem! All plants are thriving!", false);
+        showMessage(`🎉 You restored the ecosystem! All plants are thriving! Final score: ${Math.round(totalPoints)}`, false);
       } else if (turn >= MAX_TURNS) {
         gameActive = false;
-        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem.`, true);
+        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem. Final score: ${Math.round(totalPoints)}`, true);
       }
     }
 
@@ -1011,9 +1224,9 @@
       clearCooldown = Math.max(0, 5 - (turn - lastClearTurn));
       
       document.getElementById('bridge-cooldown').textContent = 
-        bridgeCooldown > 0 ? `${bridgeCooldown}turn${bridgeCooldown !== 1 ? 's' : ''}` : '';
+        bridgeCooldown > 0 ? `${bridgeCooldown} turn${bridgeCooldown !== 1 ? 's' : ''}` : '';
       document.getElementById('clear-cooldown').textContent = 
-        clearCooldown > 0 ? `${clearCooldown}turn${clearCooldown !== 1 ? 's' : ''}` : '';
+        clearCooldown > 0 ? `${clearCooldown} turn${clearCooldown !== 1 ? 's' : ''}` : '';
       
       document.getElementById('bridge-btn').disabled = bridgeCooldown > 0;
       document.getElementById('clear-btn').disabled = clearCooldown > 0;
