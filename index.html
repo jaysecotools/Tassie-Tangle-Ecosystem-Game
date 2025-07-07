@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Tasmanian Tangle: Ultimate Edition</title>
+  <title>Tasmanian Tangle: Ultimate Ecosystem Game</title>
   <style>
     :root {
       --native-color: #81c784;
       --water-color: #4fc3f7;
       --weed-color: #ff8a65;
       --path-color: #aed581;
+      --bridge-color: #bcaaa4;
     }
     body {
       font-family: 'Segoe UI', Tahoma, sans-serif;
@@ -90,6 +91,7 @@
     .tile.water { background: var(--water-color); }
     .tile.weed { background: var(--weed-color); }
     .tile.path { background: var(--path-color); }
+    .tile.bridge { background: var(--bridge-color); }
     .tile.selected {
       animation: pulse 1.5s infinite;
       box-shadow: 0 0 0 4px #ffee58, 0 0 20px #ffeb3b;
@@ -118,8 +120,9 @@
       margin-right: 10px;
     }
     #species-list {
-      max-height: 300px;
+      max-height: 200px;
       overflow-y: auto;
+      margin-bottom: 15px;
     }
     .species-card {
       background: white;
@@ -137,6 +140,18 @@
       font-weight: bold;
       margin-bottom: 5px;
       color: #1b5e20;
+    }
+    #abilities {
+      background: rgba(0,0,0,0.05);
+      padding: 10px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    .ability {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 8px 0;
     }
     #message {
       background: rgba(255,255,255,0.8);
@@ -165,17 +180,35 @@
       flex: 1;
       margin: 0 5px;
     }
-    button:hover {
+    button:disabled {
+      background: #cccccc;
+      cursor: not-allowed;
+    }
+    button:hover:not(:disabled) {
       transform: translateY(-2px);
       box-shadow: 0 5px 10px rgba(0,0,0,0.3);
     }
-    button:active {
+    button:active:not(:disabled) {
       transform: translateY(0);
     }
     #score-display {
       font-size: 1.2em;
       font-weight: bold;
       margin: 10px 0;
+    }
+    #turn-counter {
+      position: absolute;
+      top: -25px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 5px 10px;
+      border-radius: 15px;
+      font-size: 0.9em;
+    }
+    .cooldown {
+      font-size: 0.8em;
+      color: #666;
     }
     @keyframes pulse {
       0% { transform: scale(1); }
@@ -190,20 +223,23 @@
     .floating {
       animation: float 3s ease-in-out infinite;
     }
-    #turn-counter {
-      position: absolute;
-      top: -25px;
-      right: 10px;
-      background: rgba(0,0,0,0.7);
-      color: white;
-      padding: 5px 10px;
-      border-radius: 15px;
-      font-size: 0.9em;
-    }
     .highlight {
       background-color: #fff9c4;
       padding: 2px 5px;
       border-radius: 3px;
+    }
+    .progress-container {
+      width: 100%;
+      background-color: #e0e0e0;
+      border-radius: 5px;
+      margin: 5px 0;
+    }
+    .progress-bar {
+      height: 10px;
+      border-radius: 5px;
+      background-color: #4caf50;
+      width: 0%;
+      transition: width 0.3s;
     }
   </style>
 </head>
@@ -215,12 +251,15 @@
 
   <div id="game-container">
     <div id="board-container">
-      <div id="turn-counter">Turn: <span id="turn-count">1</span></div>
+      <div id="turn-counter">Turn: <span id="turn-count">1</span>/20</div>
       <div id="board"></div>
     </div>
     
     <div id="sidebar">
       <div id="score-display">🏆 Ecosystem Health: <span id="score">0</span>%</div>
+      <div class="progress-container">
+        <div id="health-bar" class="progress-bar"></div>
+      </div>
       
       <div id="resources">
         <div class="resource">
@@ -230,6 +269,18 @@
         <div class="resource">
           <div class="resource-icon">☀️</div>
           <div>Sun Patches: <span id="sun-count">0</span></div>
+        </div>
+      </div>
+      
+      <div id="abilities">
+        <h3>Tools:</h3>
+        <div class="ability">
+          <button id="bridge-btn" onclick="useTool('bridge')">🌉 Build Bridge</button>
+          <span id="bridge-cooldown" class="cooldown"></span>
+        </div>
+        <div class="ability">
+          <button id="clear-btn" onclick="useTool('clear')">🔄 Clear Weeds</button>
+          <span id="clear-cooldown" class="cooldown"></span>
         </div>
       </div>
       
@@ -250,6 +301,7 @@
     // GAME CONFIG
     // ================
     const BOARD_SIZE = 8;
+    const MAX_TURNS = 20;
     const SPECIES = [
       { 
         emoji: '🌿', 
@@ -296,6 +348,10 @@
     let turn = 1;
     let gameActive = true;
     let discoveredSpecies = [];
+    let lastBridgeTurn = -3;
+    let lastClearTurn = -5;
+    let bridgeCooldown = 0;
+    let clearCooldown = 0;
 
     // ================
     // INITIALIZATION
@@ -309,8 +365,11 @@
       turn = 1;
       gameActive = true;
       discoveredSpecies = [];
+      lastBridgeTurn = -3;
+      lastClearTurn = -5;
       updateScore();
       updateTurnCounter();
+      updateCooldowns();
       
       // Create tiles
       for (let y = 0; y < BOARD_SIZE; y++) {
@@ -330,32 +389,137 @@
         }
       }
 
-      // Place initial elements
-      placeRandom('water', '💧', 4);
-      placeRandom('sun', '☀️', 4);
-      placeRandom('native', getRandomSpecies().emoji, 5);
-      placeRandom('weed', getRandomThreat().emoji, 3);
-      
-      updateResourceCounts();
+      // Place game elements with smart placement
+      placeWithPathways();
       renderSpeciesList();
       showMessage("Welcome! Connect native plants to resources.", false);
     }
 
-    function placeRandom(type, emoji, count) {
+    function placeWithPathways() {
+      // Place water and sun in connected clusters
+      placeCluster('water', '💧', 3, 2);
+      placeCluster('sun', '☀️', 3, 2);
+      
+      // Place plants near their required resources
+      SPECIES.forEach(species => {
+        const neededResources = species.needs;
+        neededResources.forEach(resource => {
+          placeNearResource('native', species.emoji, 2, resource);
+        });
+      });
+
+      // Place weeds away from resources
+      placeRandom('weed', getRandomThreat().emoji, 3, true);
+    }
+
+    function placeCluster(type, emoji, clusters, clusterSize) {
+      for (let c = 0; c < clusters; c++) {
+        const startX = Math.floor(Math.random() * (BOARD_SIZE - 2));
+        const startY = Math.floor(Math.random() * (BOARD_SIZE - 2));
+        
+        for (let i = 0; i < clusterSize; i++) {
+          const x = startX + Math.floor(Math.random() * 3);
+          const y = startY + Math.floor(Math.random() * 3);
+          if (board[y][x].type === 'empty') {
+            convertTile(x, y, type, emoji);
+          }
+        }
+      }
+    }
+
+    function placeNearResource(type, emoji, count, nearType) {
+      let placed = 0;
+      const attempts = 0;
+      const maxAttempts = 20;
+      
+      while (placed < count && attempts < maxAttempts) {
+        // Find random resource of nearType
+        const resources = [];
+        for (let y = 0; y < BOARD_SIZE; y++) {
+          for (let x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x].type === nearType) resources.push({x, y});
+          }
+        }
+        
+        if (resources.length > 0) {
+          const {x: rx, y: ry} = resources[Math.floor(Math.random() * resources.length)];
+          
+          // Place in adjacent tile
+          const directions = [
+            {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
+          ];
+          
+          for (const dir of directions) {
+            const nx = rx + dir.dx;
+            const ny = ry + dir.dy;
+            if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && 
+                board[ny][nx].type === 'empty') {
+              convertTile(nx, ny, type, emoji);
+              placed++;
+              break;
+            }
+          }
+        }
+        attempts++;
+      }
+      
+      // Fallback to random placement
+      while (placed < count) {
+        placeRandom(type, emoji, 1);
+        placed++;
+      }
+    }
+
+    function placeRandom(type, emoji, count, avoidResources = false) {
       for (let i = 0; i < count; i++) {
         let x, y;
+        let attempts = 0;
+        const maxAttempts = 50;
+        
         do {
           x = Math.floor(Math.random() * BOARD_SIZE);
           y = Math.floor(Math.random() * BOARD_SIZE);
-        } while (board[y][x].type !== 'empty');
+          attempts++;
+          
+          if (attempts >= maxAttempts) break;
+        } while (
+          board[y][x].type !== 'empty' || 
+          (avoidResources && isNearResource(x, y))
+        );
         
-        board[y][x].type = type;
-        board[y][x].element.textContent = emoji;
-        board[y][x].element.classList.add(type);
-        
-        // Special effects
-        if (type === 'water') board[y][x].element.classList.add('floating');
-        if (type === 'sun') board[y][x].element.style.animationDelay = `${Math.random() * 2}s`;
+        if (attempts < maxAttempts) {
+          convertTile(x, y, type, emoji);
+        }
+      }
+    }
+
+    function isNearResource(x, y) {
+      const directions = [
+        {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1},
+        {dx:1,dy:1}, {dx:-1,dy:1}, {dx:1,dy:-1}, {dx:-1,dy:-1}
+      ];
+      
+      for (const dir of directions) {
+        const nx = x + dir.dx;
+        const ny = y + dir.dy;
+        if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+          if (board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function convertTile(x, y, type, emoji) {
+      board[y][x].type = type;
+      board[y][x].element.textContent = emoji;
+      board[y][x].element.className = 'tile ' + type;
+      
+      // Special effects
+      if (type === 'water') board[y][x].element.classList.add('floating');
+      if (type === 'sun') {
+        board[y][x].element.style.animation = `float 3s ease-in-out ${Math.random() * 2}s infinite`;
       }
     }
 
@@ -397,60 +561,216 @@
           showMessage(`This plant doesn't need ${tile.type}!`, true);
         }
       }
+      // Use bridge
+      else if (selectedTile && tile.type === 'bridge') {
+        if (connectThroughBridge(selectedTile.x, selectedTile.y, x, y)) {
+          selectedTile.element.classList.remove('selected');
+          selectedTile = null;
+        }
+      }
     }
 
     function connectTiles(x1, y1, x2, y2) {
-      // Only allow straight lines
-      if (x1 !== x2 && y1 !== y2) {
-        showMessage("⚠️ Connect in straight lines only!", true);
+      // Check if connection is possible
+      if (!canConnect(x1, y1, x2, y2)) {
+        showMessage("Cannot connect these tiles!", true);
         return false;
       }
 
-      // Check path
-      const path = [];
-      if (x1 === x2) { // Vertical line
-        const start = Math.min(y1, y2);
-        const end = Math.max(y1, y2);
-        for (let y = start + 1; y < end; y++) {
-          if (board[y][x1].type === 'weed') {
-            showMessage("🚫 Path blocked by weeds!", true);
-            return false;
-          }
-          if (board[y][x1].type !== 'empty' && board[y][x1].type !== 'path') {
-            showMessage("🚫 Path blocked!", true);
-            return false;
-          }
-          path.push({x: x1, y});
-        }
-      } else { // Horizontal line
-        const start = Math.min(x1, x2);
-        const end = Math.max(x1, x2);
-        for (let x = start + 1; x < end; x++) {
-          if (board[y1][x].type === 'weed') {
-            showMessage("🚫 Path blocked by weeds!", true);
-            return false;
-          }
-          if (board[y1][x].type !== 'empty' && board[y1][x].type !== 'path') {
-            showMessage("🚫 Path blocked!", true);
-            return false;
-          }
-          path.push({x, y: y1});
-        }
-      }
-
       // Draw path with animation
+      const path = getConnectionPath(x1, y1, x2, y2);
+      if (!path) return false;
+
       path.forEach(({x, y}, i) => {
         setTimeout(() => {
-          board[y][x].type = 'path';
-          board[y][x].element.textContent = '🌱';
-          board[y][x].element.classList.add('path');
-          board[y][x].element.classList.add('floating');
-          board[y][x].element.style.animationDelay = `${i * 0.1}s`;
+          if (board[y][x].type === 'empty') {
+            convertTile(x, y, 'path', '🌱');
+          }
         }, i * 100);
       });
 
       showMessage("🌱 Connection growing...", false);
+      checkGameState();
       return true;
+    }
+
+    function canConnect(x1, y1, x2, y2) {
+      // Direct connection
+      if (x1 === x2 || y1 === y2) {
+        return hasClearPath(x1, y1, x2, y2);
+      }
+      // L-shaped connection
+      return (
+        (hasClearPath(x1, y1, x1, y2) && hasClearPath(x1, y2, x2, y2)) ||
+        (hasClearPath(x1, y1, x2, y1) && hasClearPath(x2, y1, x2, y2))
+      );
+    }
+
+    function getConnectionPath(x1, y1, x2, y2) {
+      const path = [];
+      
+      // Vertical then horizontal
+      if (hasClearPath(x1, y1, x1, y2) && hasClearPath(x1, y2, x2, y2)) {
+        // Vertical segment
+        const startY = Math.min(y1, y2);
+        const endY = Math.max(y1, y2);
+        for (let y = startY + 1; y < endY; y++) {
+          path.push({x: x1, y});
+        }
+        // Horizontal segment
+        const startX = Math.min(x1, x2);
+        const endX = Math.max(x1, x2);
+        for (let x = startX + 1; x < endX; x++) {
+          path.push({x, y: y2});
+        }
+      }
+      // Horizontal then vertical
+      else if (hasClearPath(x1, y1, x2, y1) && hasClearPath(x2, y1, x2, y2)) {
+        // Horizontal segment
+        const startX = Math.min(x1, x2);
+        const endX = Math.max(x1, x2);
+        for (let x = startX + 1; x < endX; x++) {
+          path.push({x, y: y1});
+        }
+        // Vertical segment
+        const startY = Math.min(y1, y2);
+        const endY = Math.max(y1, y2);
+        for (let y = startY + 1; y < endY; y++) {
+          path.push({x: x2, y});
+        }
+      }
+      
+      return path.length > 0 ? path : null;
+    }
+
+    function hasClearPath(x1, y1, x2, y2) {
+      if (x1 === x2 && y1 === y2) return true;
+      
+      const dx = Math.sign(x2 - x1);
+      const dy = Math.sign(y2 - y1);
+      let x = x1 + dx;
+      let y = y1 + dy;
+      
+      while (x !== x2 || y !== y2) {
+        if (board[y][x].type === 'weed' || 
+            (board[y][x].type !== 'empty' && board[y][x].type !== 'path' && board[y][x].type !== 'bridge')) {
+          return false;
+        }
+        x += dx;
+        y += dy;
+      }
+      
+      return true;
+    }
+
+    function connectThroughBridge(x1, y1, x2, y2) {
+      if (!selectedTile || board[y2][x2].type !== 'bridge') {
+        showMessage("Select a plant and then click a bridge!", true);
+        return false;
+      }
+      
+      // Find what resource the bridge is connected to
+      let resourceTile = null;
+      const directions = [
+        {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
+      ];
+      
+      for (const dir of directions) {
+        const nx = x2 + dir.dx;
+        const ny = y2 + dir.dy;
+        if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+          if (board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
+            resourceTile = {x: nx, y: ny, type: board[ny][nx].type};
+            break;
+          }
+        }
+      }
+      
+      if (!resourceTile) {
+        showMessage("This bridge isn't connected to a resource!", true);
+        return false;
+      }
+      
+      // Check if plant needs this resource
+      if (!selectedTile.species.needs.includes(resourceTile.type)) {
+        showMessage(`This plant doesn't need ${resourceTile.type}!`, true);
+        return false;
+      }
+      
+      // Connect through bridge
+      const path1 = getConnectionPath(x1, y1, x2, y2);
+      const path2 = getConnectionPath(x2, y2, resourceTile.x, resourceTile.y);
+      
+      if (path1 && path2) {
+        // Animate first path
+        path1.forEach(({x, y}, i) => {
+          setTimeout(() => {
+            if (board[y][x].type === 'empty') {
+              convertTile(x, y, 'path', '🌱');
+            }
+          }, i * 100);
+        });
+        
+        // Animate second path
+        path2.forEach(({x, y}, i) => {
+          setTimeout(() => {
+            if (board[y][x].type === 'empty') {
+              convertTile(x, y, 'path', '🌱');
+            }
+          }, (path1.length + i) * 100);
+        });
+        
+        showMessage("Connected through bridge!", false);
+        checkGameState();
+        return true;
+      }
+      
+      showMessage("Cannot connect through this bridge!", true);
+      return false;
+    }
+
+    function useTool(toolType) {
+      if (!selectedTile) {
+        showMessage("Select a tile first!", true);
+        return;
+      }
+
+      const {x, y} = selectedTile;
+      
+      switch(toolType) {
+        case 'bridge':
+          if (turn - lastBridgeTurn < 3) {
+            showMessage(`Bridge on cooldown! Wait ${3 - (turn - lastBridgeTurn)} more turns.`, true);
+            return;
+          }
+          if (board[y][x].type !== 'empty') {
+            showMessage("Can only build bridges on empty tiles!", true);
+            return;
+          }
+          convertTile(x, y, 'bridge', '🌉');
+          lastBridgeTurn = turn;
+          updateCooldowns();
+          showMessage("Built a bridge! Now connect plants through it.", false);
+          break;
+          
+        case 'clear':
+          if (turn - lastClearTurn < 5) {
+            showMessage(`Weed clearing on cooldown! Wait ${5 - (turn - lastClearTurn)} more turns.`, true);
+            return;
+          }
+          if (board[y][x].type !== 'weed') {
+            showMessage("Can only clear weed tiles!", true);
+            return;
+          }
+          convertTile(x, y, 'empty', '');
+          lastClearTurn = turn;
+          updateCooldowns();
+          showMessage("Cleared weeds! Native plants can grow here now.", false);
+          break;
+      }
+      
+      selectedTile.element.classList.remove('selected');
+      selectedTile = null;
     }
 
     function endTurn() {
@@ -458,22 +778,28 @@
       
       turn++;
       updateTurnCounter();
+      updateCooldowns();
       
       // Weeds spread
       spreadWeeds();
       
       // Random events
-      if (Math.random() < 0.3) triggerRandomEvent();
+      if (turn > 5 && Math.random() < 0.4) triggerRandomEvent();
       
       // Check win/lose
       checkGameState();
+      
+      // Respawn resources periodically
+      if (turn % 4 === 0) respawnResources();
     }
 
     function spreadWeeds() {
       const newWeeds = [];
+      const weedSpreadRate = Math.min(0.3 + (turn / 50), 0.7); // Increases over time
+      
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
-          if (board[y][x].type === 'weed' && Math.random() < 0.4) {
+          if (board[y][x].type === 'weed' && Math.random() < weedSpreadRate) {
             const directions = [
               {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
             ].sort(() => Math.random() - 0.5);
@@ -494,11 +820,24 @@
       if (newWeeds.length > 0) {
         showMessage(`⚠️ Weeds spread to ${newWeeds.length} new areas!`, true);
         newWeeds.forEach(({x, y}) => {
-          board[y][x].type = 'weed';
-          board[y][x].element.textContent = getRandomThreat().emoji;
-          board[y][x].element.classList.add('weed');
+          convertTile(x, y, 'weed', getRandomThreat().emoji);
         });
       }
+    }
+
+    function respawnResources() {
+      const emptyTiles = getEmptyTiles();
+      if (emptyTiles.length === 0) return;
+      
+      // Determine which resource to respawn
+      const waterCount = countResources('water');
+      const sunCount = countResources('sun');
+      const respawnType = waterCount <= sunCount ? 'water' : 'sun';
+      
+      const {x, y} = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
+      convertTile(x, y, respawnType, respawnType === 'water' ? '💧' : '☀️');
+      showMessage(`💧 A new ${respawnType} source emerged!`, false);
+      updateResourceCounts();
     }
 
     function triggerRandomEvent() {
@@ -506,17 +845,10 @@
         { 
           name: 'Rainfall', 
           effect: () => {
-            const emptyTiles = [];
-            for (let y = 0; y < BOARD_SIZE; y++) {
-              for (let x = 0; x < BOARD_SIZE; x++) {
-                if (board[y][x].type === 'empty') emptyTiles.push({x, y});
-              }
-            }
+            const emptyTiles = getEmptyTiles();
             if (emptyTiles.length > 0) {
               const {x, y} = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
-              board[y][x].type = 'water';
-              board[y][x].element.textContent = '💧';
-              board[y][x].element.classList.add('water', 'floating');
+              convertTile(x, y, 'water', '💧');
               showMessage("🌧️ Rainfall created a new water source!", false);
               updateResourceCounts();
             }
@@ -534,9 +866,7 @@
             }
             if (waterTiles.length > 1) {
               const {x, y} = waterTiles[Math.floor(Math.random() * waterTiles.length)];
-              board[y][x].type = 'empty';
-              board[y][x].element.textContent = '';
-              board[y][x].className = 'tile';
+              convertTile(x, y, 'empty', '');
               showMessage("☀️ Drought dried up a water source!", true);
               updateResourceCounts();
             }
@@ -585,9 +915,9 @@
       if (score === 100) {
         gameActive = false;
         showMessage("🎉 You restored the ecosystem! All plants are thriving!", false);
-      } else if (turn >= 15) {
+      } else if (turn >= MAX_TURNS) {
         gameActive = false;
-        showMessage("💀 The ecosystem collapsed... Try again?", true);
+        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem.`, true);
       }
     }
 
@@ -610,7 +940,8 @@
           if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && !visited.has(key)) {
             if (nx === x2 && ny === y2) return true;
             
-            if (board[ny][nx].type === 'path' || board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
+            if (board[ny][nx].type === 'path' || board[ny][nx].type === 'bridge' || 
+                board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
               visited.add(key);
               queue.push({x: nx, y: ny});
             }
@@ -645,30 +976,47 @@
     }
 
     function updateResourceCounts() {
-      let water = 0;
-      let sun = 0;
-      
+      document.getElementById('water-count').textContent = countResources('water');
+      document.getElementById('sun-count').textContent = countResources('sun');
+    }
+
+    function countResources(type) {
+      let count = 0;
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
-          if (board[y][x].type === 'water') water++;
-          if (board[y][x].type === 'sun') sun++;
+          if (board[y][x].type === type) count++;
         }
       }
-      
-      document.getElementById('water-count').textContent = water;
-      document.getElementById('sun-count').textContent = sun;
+      return count;
     }
 
     function updateScore() {
       document.getElementById('score').textContent = score;
-      document.getElementById('score-display').style.color = 
+      document.getElementById('health-bar').style.width = `${score}%`;
+      
+      const scoreDisplay = document.getElementById('score-display');
+      scoreDisplay.style.color = 
         score < 30 ? '#d32f2f' : score < 70 ? '#ff8f00' : '#2e7d32';
     }
 
     function updateTurnCounter() {
       document.getElementById('turn-count').textContent = turn;
-      document.getElementById('turn-counter').style.backgroundColor = 
-        turn > 10 ? 'rgba(211,47,47,0.8)' : 'rgba(0,0,0,0.7)';
+      const counter = document.getElementById('turn-counter');
+      counter.style.backgroundColor = 
+        turn > MAX_TURNS - 5 ? 'rgba(211,47,47,0.8)' : 'rgba(0,0,0,0.7)';
+    }
+
+    function updateCooldowns() {
+      bridgeCooldown = Math.max(0, 3 - (turn - lastBridgeTurn));
+      clearCooldown = Math.max(0, 5 - (turn - lastClearTurn));
+      
+      document.getElementById('bridge-cooldown').textContent = 
+        bridgeCooldown > 0 ? `${bridgeCooldown}turn${bridgeCooldown !== 1 ? 's' : ''}` : '';
+      document.getElementById('clear-cooldown').textContent = 
+        clearCooldown > 0 ? `${clearCooldown}turn${clearCooldown !== 1 ? 's' : ''}` : '';
+      
+      document.getElementById('bridge-btn').disabled = bridgeCooldown > 0;
+      document.getElementById('clear-btn').disabled = clearCooldown > 0;
     }
 
     function showMessage(text, isWarning) {
@@ -681,6 +1029,16 @@
     // ================
     // HELPER FUNCTIONS
     // ================
+    function getEmptyTiles() {
+      const tiles = [];
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+          if (board[y][x].type === 'empty') tiles.push({x, y});
+        }
+      }
+      return tiles;
+    }
+
     function getRandomSpecies() {
       // Weighted random based on rarity
       const pool = [];
@@ -702,6 +1060,7 @@
 
     function resetGame() {
       initGame();
+      showMessage("Game reset! Connect plants to resources.", false);
     }
 
     // Start the game
