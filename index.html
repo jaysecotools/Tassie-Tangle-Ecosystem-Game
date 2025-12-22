@@ -479,6 +479,7 @@
       updateTurnCounter();
       updateCooldowns();
       updateLevelDisplay();
+      updateTotalScore(); // Added this line
       
       // Create tiles
       for (let y = 0; y < BOARD_SIZE; y++) {
@@ -507,34 +508,41 @@
     }
 
     function placeWithPathways() {
-      // Place water and sun in connected clusters (fewer as level increases)
+      // Clear the board first
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+          board[y][x].type = 'empty';
+          board[y][x].element.textContent = '';
+          board[y][x].element.className = 'tile';
+          board[y][x].connected = false;
+        }
+      }
+      
+      // Place water and sun in connected clusters
       const resourceClusters = Math.max(2, 4 - Math.floor(level / 3));
       placeCluster('water', '💧', resourceClusters, 3);
       placeCluster('sun', '☀️', resourceClusters, 3);
       
-      // Place plants near their required resources (more as level increases)
+      // Place plants near their required resources
       const plantsPerSpecies = 1 + Math.floor(level / 2);
       SPECIES.forEach(species => {
-        const neededResources = species.needs;
-        neededResources.forEach(resource => {
-          placeNearResource('native', species.emoji, plantsPerSpecies, resource);
-        });
+        placeNearResource('native', species.emoji, plantsPerSpecies, species.needs[0]);
       });
 
-      // Place weeds (more as level increases)
+      // Place weeds
       const initialWeeds = 3 + level;
       placeRandom('weed', getRandomThreat().emoji, initialWeeds, true);
     }
 
     function placeCluster(type, emoji, clusters, clusterSize) {
       for (let c = 0; c < clusters; c++) {
-        const startX = Math.floor(Math.random() * (BOARD_SIZE - 2));
-        const startY = Math.floor(Math.random() * (BOARD_SIZE - 2));
+        const startX = Math.floor(Math.random() * (BOARD_SIZE - 3)) + 1;
+        const startY = Math.floor(Math.random() * (BOARD_SIZE - 3)) + 1;
         
         for (let i = 0; i < clusterSize; i++) {
-          const x = startX + Math.floor(Math.random() * 3);
-          const y = startY + Math.floor(Math.random() * 3);
-          if (board[y][x].type === 'empty') {
+          const x = startX + Math.floor(Math.random() * 3) - 1;
+          const y = startY + Math.floor(Math.random() * 3) - 1;
+          if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE && board[y][x].type === 'empty') {
             convertTile(x, y, type, emoji);
           }
         }
@@ -574,7 +582,6 @@
             }
           }
         }
-        attempts++;
       }
       
       // Fallback to random placement
@@ -629,6 +636,10 @@
       board[y][x].type = type;
       board[y][x].element.textContent = emoji;
       board[y][x].element.className = 'tile ' + type;
+      
+      // Remove animations first
+      board[y][x].element.classList.remove('floating');
+      board[y][x].element.style.animation = '';
       
       // Special effects
       if (type === 'water') board[y][x].element.classList.add('floating');
@@ -698,6 +709,14 @@
       else if (selectedTile && tile.type === 'empty') {
         showMessage(`First connect to a needed resource (${selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' or ')})`, true);
       }
+      // Clicked weed tile with plant selected
+      else if (selectedTile && tile.type === 'weed') {
+        showMessage(`Cannot connect through weeds! Clear them first.`, true);
+      }
+      // Clicked path tile with plant selected
+      else if (selectedTile && tile.type === 'path') {
+        showMessage(`Select a resource to connect to (💧 or ☀️)`, false);
+      }
     }
 
     function connectTiles(x1, y1, x2, y2) {
@@ -707,15 +726,18 @@
         return false;
       }
 
-      // Draw path with animation
-      const path = getConnectionPath(x1, y1, x2, y2);
-      if (!path) return false;
-
       // Check if this connection already exists
       const connectionKey = `${x1},${y1}-${x2},${y2}`;
       const reverseKey = `${x2},${y2}-${x1},${y1}`;
       if (connections.includes(connectionKey) || connections.includes(reverseKey)) {
         showMessage("These are already connected!", true);
+        return false;
+      }
+
+      // Draw path with animation
+      const path = getConnectionPath(x1, y1, x2, y2);
+      if (!path) {
+        showMessage("Cannot find a path!", true);
         return false;
       }
 
@@ -775,8 +797,12 @@
     }
 
     function canConnect(x1, y1, x2, y2) {
-      // Direct connection
-      if (x1 === x2 || y1 === y2) {
+      // Direct horizontal connection
+      if (y1 === y2) {
+        return hasClearPath(x1, y1, x2, y2);
+      }
+      // Direct vertical connection
+      if (x1 === x2) {
         return hasClearPath(x1, y1, x2, y2);
       }
       // L-shaped connection
@@ -789,11 +815,27 @@
     function getConnectionPath(x1, y1, x2, y2) {
       const path = [];
       
-      // Vertical then horizontal
-      if (hasClearPath(x1, y1, x1, y2) && hasClearPath(x1, y2, x2, y2)) {
+      // Same row
+      if (y1 === y2) {
+        const startX = Math.min(x1, x2) + 1;
+        const endX = Math.max(x1, x2);
+        for (let x = startX; x < endX; x++) {
+          path.push({x, y: y1});
+        }
+      }
+      // Same column
+      else if (x1 === x2) {
+        const startY = Math.min(y1, y2) + 1;
+        const endY = Math.max(y1, y2);
+        for (let y = startY; y < endY; y++) {
+          path.push({x: x1, y});
+        }
+      }
+      // L-shaped: vertical then horizontal
+      else if (hasClearPath(x1, y1, x1, y2) && hasClearPath(x1, y2, x2, y2)) {
         // Vertical segment
         const yStart = y1 < y2 ? y1 + 1 : y1 - 1;
-        const yEnd = y1 < y2 ? y2 : y2 + 1;
+        const yEnd = y1 < y2 ? y2 : y2 - 1;
         const yStep = y1 < y2 ? 1 : -1;
         
         for (let y = yStart; y !== yEnd; y += yStep) {
@@ -801,19 +843,22 @@
         }
         
         // Horizontal segment
-        const xStart = x1 < x2 ? x1 + 1 : x1 - 1;
-        const xEnd = x1 < x2 ? x2 : x2 + 1;
+        const xStart = x1 < x2 ? x1 : x2;
+        const xEnd = x1 < x2 ? x2 : x1;
         const xStep = x1 < x2 ? 1 : -1;
         
-        for (let x = xStart; x !== xEnd; x += xStep) {
-          path.push({x, y: y2});
+        // Start from the corner
+        let currentX = x1;
+        while (currentX !== x2) {
+          path.push({x: currentX, y: y2});
+          currentX += xStep;
         }
       }
-      // Horizontal then vertical
+      // L-shaped: horizontal then vertical
       else if (hasClearPath(x1, y1, x2, y1) && hasClearPath(x2, y1, x2, y2)) {
         // Horizontal segment
         const xStart = x1 < x2 ? x1 + 1 : x1 - 1;
-        const xEnd = x1 < x2 ? x2 : x2 + 1;
+        const xEnd = x1 < x2 ? x2 : x2 - 1;
         const xStep = x1 < x2 ? 1 : -1;
         
         for (let x = xStart; x !== xEnd; x += xStep) {
@@ -821,12 +866,15 @@
         }
         
         // Vertical segment
-        const yStart = y1 < y2 ? y1 + 1 : y1 - 1;
-        const yEnd = y1 < y2 ? y2 : y2 + 1;
+        const yStart = y1 < y2 ? y1 : y2;
+        const yEnd = y1 < y2 ? y2 : y1;
         const yStep = y1 < y2 ? 1 : -1;
         
-        for (let y = yStart; y !== yEnd; y += yStep) {
-          path.push({x: x2, y});
+        // Start from the corner
+        let currentY = y1;
+        while (currentY !== y2) {
+          path.push({x: x2, y: currentY});
+          currentY += yStep;
         }
       }
       
@@ -834,20 +882,33 @@
     }
 
     function hasClearPath(x1, y1, x2, y2) {
+      // Same tile
       if (x1 === x2 && y1 === y2) return true;
       
       const dx = Math.sign(x2 - x1);
       const dy = Math.sign(y2 - y1);
-      let x = x1 + dx;
-      let y = y1 + dy;
+      let x = x1;
+      let y = y1;
       
+      // Move towards destination, checking intermediate tiles
       while (x !== x2 || y !== y2) {
-        if (board[y][x].type === 'weed' || 
-            (board[y][x].type !== 'empty' && board[y][x].type !== 'path' && board[y][x].type !== 'bridge')) {
-          return false;
-        }
         x += dx;
         y += dy;
+        
+        // Check bounds
+        if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) {
+          return false;
+        }
+        
+        // Check if tile is passable (not counting start and end points for intermediate checks)
+        if (!(x === x2 && y === y2)) {
+          if (board[y][x].type === 'weed' || 
+              (board[y][x].type !== 'empty' && 
+               board[y][x].type !== 'path' && 
+               board[y][x].type !== 'bridge')) {
+            return false;
+          }
+        }
       }
       
       return true;
@@ -1200,7 +1261,7 @@
       }
       
       // Update score
-      const newScore = Math.floor((connectedPlants / totalPlants) * 100);
+      const newScore = totalPlants > 0 ? Math.floor((connectedPlants / totalPlants) * 100) : 0;
       if (newScore !== score) {
         score = newScore;
         updateScore();
@@ -1256,7 +1317,8 @@
             if (nx === x2 && ny === y2) return true;
             
             if (board[ny][nx].type === 'path' || board[ny][nx].type === 'bridge' || 
-                board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
+                board[ny][nx].type === 'water' || board[ny][nx].type === 'sun' ||
+                (nx === x1 && ny === y1) || (nx === x2 && ny === y2)) {
               visited.add(key);
               queue.push({x: nx, y: ny});
             }
