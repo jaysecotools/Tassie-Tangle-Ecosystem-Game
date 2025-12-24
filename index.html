@@ -158,6 +158,25 @@
             50% { transform: scale(1.3); opacity: 0.7; }
         }
         
+.tile.fully-connected {
+    box-shadow: 
+        inset 0 0 30px rgba(255, 255, 255, 0.7),
+        0 0 0 4px #4caf50,
+        0 0 25px rgba(76, 175, 80, 0.8);
+    animation: fully-connected-glow 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes fully-connected-glow {
+    0% { box-shadow: 
+        inset 0 0 25px rgba(255, 255, 255, 0.6),
+        0 0 0 3px #4caf50,
+        0 0 20px rgba(76, 175, 80, 0.7); }
+    100% { box-shadow: 
+        inset 0 0 35px rgba(255, 255, 255, 0.8),
+        0 0 0 4px #4caf50,
+        0 0 30px rgba(76, 175, 80, 0.9); }
+}
+
         /* Better connected plant indicator */
         .tile.connected-plant {
             box-shadow: 
@@ -798,29 +817,35 @@
             for (let x = 0; x < BOARD_SIZE; x++) {
                 if (board[y][x].type === 'native') {
                     const species = findSpecies(board[y][x].element.textContent);
-                    let needsMet = 0;
-                    
-                    if (species.needs.includes('water')) {
-                        for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                            for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                                if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
-                                    needsMet++;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (species.needs.includes('sun')) {
-                        for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                            for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                                if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
-                                    needsMet++;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+let needsMet = 0;
+let waterConnected = false;
+let sunConnected = false;
+
+if (species.needs.includes('water')) {
+    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+            if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
+                waterConnected = true;
+                needsMet++;
+                break;
+            }
+        }
+        if (waterConnected) break;
+    }
+}
+
+if (species.needs.includes('sun')) {
+    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+            if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
+                sunConnected = true;
+                needsMet++;
+                break;
+            }
+        }
+        if (sunConnected) break;
+    }
+}
                     
                     const tile = board[y][x].element;
                     const status = document.createElement('div');
@@ -1153,29 +1178,40 @@ function handleTileClick(x, y) {
         const species = selectedTile.species;
         
         // Check if already fully connected
-        let isFullyConnected = false;
-        if (species.needs.includes('water')) {
-            for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                    if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
-                        isFullyConnected = true;
-                        break;
-                    }
-                }
+// Check if already fully connected
+let waterConnected = false;
+let sunConnected = false;
+
+if (species.needs.includes('water')) {
+    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+            if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
+                waterConnected = true;
+                break;
             }
         }
-        
-        if (isFullyConnected && species.needs.includes('sun')) {
-            for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                    if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
-                        isFullyConnected = true;
-                        break;
-                    }
-                }
+        if (waterConnected) break;
+    }
+} else {
+    waterConnected = true; // Doesn't need water
+}
+
+if (species.needs.includes('sun')) {
+    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+            if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
+                sunConnected = true;
+                break;
             }
         }
-        
+        if (sunConnected) break;
+    }
+} else {
+    sunConnected = true; // Doesn't need sun
+}
+
+const isFullyConnected = (!species.needs.includes('water') || waterConnected) && 
+                         (!species.needs.includes('sun') || sunConnected);        
         if (isFullyConnected) {
             playSound('error');
             showMessage("This plant is already fully connected! Try another plant.", true);
@@ -1468,47 +1504,54 @@ function connectThroughBridge(x1, y1, x2, y2) {
     showMessage("Cannot connect through this bridge! Path is blocked.", true);
     return false;
 }
-    function checkPlantNeeds(x, y) {
-        if (board[y][x].type !== 'native') return;
-        
-        const species = findSpecies(board[y][x].element.textContent);
-        let needsMet = 0;
-        
-        if (species.needs.includes('water')) {
-            for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                    if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
-                        needsMet++;
-                        break;
-                    }
+function checkPlantNeeds(x, y) {
+    if (board[y][x].type !== 'native') return;
+    
+    const species = findSpecies(board[y][x].element.textContent);
+    let waterConnected = false;
+    let sunConnected = false;
+    
+    if (species.needs.includes('water')) {
+        for (let ty = 0; ty < BOARD_SIZE; ty++) {
+            for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
+                    waterConnected = true;
+                    break;
                 }
             }
+            if (waterConnected) break;
         }
-        
-        if (species.needs.includes('sun')) {
-            for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                    if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
-                        needsMet++;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        if (needsMet >= species.needs.length) {
-            multiplier += 0.2;
-            const pointsEarned = Math.floor(species.points * multiplier);
-            levelScore += pointsEarned;
-            totalScore += pointsEarned;
-            updateTotalScore();
-            updateScore();
-            showMessage(`Great job! ${species.name} is thriving! +${pointsEarned} points (x${multiplier.toFixed(1)})`, false);
-        }
-        
-        updateConnectionVisuals();
     }
-
+    
+    if (species.needs.includes('sun')) {
+        for (let ty = 0; ty < BOARD_SIZE; ty++) {
+            for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
+                    sunConnected = true;
+                    break;
+                }
+            }
+            if (sunConnected) break;
+        }
+    }
+    
+    // Only award points if ALL needs are met
+    const needsMet = (!species.needs.includes('water') || waterConnected) && 
+                     (!species.needs.includes('sun') || sunConnected);
+    
+    if (needsMet && !board[y][x].element.classList.contains('fully-connected')) {
+        board[y][x].element.classList.add('fully-connected');
+        multiplier += 0.2;
+        const pointsEarned = Math.floor(species.points * multiplier);
+        levelScore += pointsEarned;
+        totalScore += pointsEarned;
+        updateTotalScore();
+        updateScore();
+        showMessage(`Great job! ${species.name} is thriving! +${pointsEarned} points (x${multiplier.toFixed(1)})`, false);
+    }
+    
+    updateConnectionVisuals();
+}
     function useTool(toolType) {
         if (!selectedTile) {
             playSound('error');
@@ -1749,63 +1792,73 @@ function connectThroughBridge(x1, y1, x2, y2) {
         updateConnectionVisuals();
     }
 
-    function checkGameState() {
-        let connectedPlants = 0;
-        let totalPlants = 0;
-        
-        for (let y = 0; y < BOARD_SIZE; y++) {
-            for (let x = 0; x < BOARD_SIZE; x++) {
-                if (board[y][x].type === 'native') {
-                    totalPlants++;
-                    const species = findSpecies(board[y][x].element.textContent);
-                    let needsMet = 0;
-                    
-                    if (species.needs.includes('water')) {
-                        for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                            for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                                if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
-                                    needsMet++;
-                                    break;
-                                }
+function checkGameState() {
+    let connectedPlants = 0;
+    let totalPlants = 0;
+    
+    for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x].type === 'native') {
+                totalPlants++;
+                const species = findSpecies(board[y][x].element.textContent);
+                let waterConnected = false;
+                let sunConnected = false;
+                
+                // Check water connection if needed
+                if (species.needs.includes('water')) {
+                    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+                        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                            if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
+                                waterConnected = true;
+                                break;
                             }
                         }
+                        if (waterConnected) break;
                     }
-                    
-                    if (species.needs.includes('sun')) {
-                        for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                            for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                                if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
-                                    needsMet++;
-                                    break;
-                                }
+                } else {
+                    waterConnected = true; // Doesn't need water, so consider it "connected"
+                }
+                
+                // Check sun connection if needed
+                if (species.needs.includes('sun')) {
+                    for (let ty = 0; ty < BOARD_SIZE; ty++) {
+                        for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                            if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
+                                sunConnected = true;
+                                break;
                             }
                         }
+                        if (sunConnected) break;
                     }
-                    
-                    if (needsMet >= species.needs.length) {
-                        connectedPlants++;
-                    }
+                } else {
+                    sunConnected = true; // Doesn't need sun, so consider it "connected"
+                }
+                
+                // Plant is fully connected only if ALL its needs are met
+                if ((!species.needs.includes('water') || waterConnected) && 
+                    (!species.needs.includes('sun') || sunConnected)) {
+                    connectedPlants++;
                 }
             }
         }
-        
-        const newScore = totalPlants > 0 ? Math.floor((connectedPlants / totalPlants) * 100) : 0;
-        if (newScore !== score) {
-            score = newScore;
-            updateScore();
-        }
-        
-        if (score === 100) {
-            gameActive = false;
-            levelComplete();
-        } else if (turn >= maxTurns) {
-            gameActive = false;
-            showMessage(`💀 Time's up! You restored ${score}% of the ecosystem. Total Score: ${totalScore}`, true);
-        }
-        
-        updateConnectionVisuals();
     }
-
+    
+    const newScore = totalPlants > 0 ? Math.floor((connectedPlants / totalPlants) * 100) : 0;
+    if (newScore !== score) {
+        score = newScore;
+        updateScore();
+    }
+    
+    if (score === 100) {
+        gameActive = false;
+        levelComplete();
+    } else if (turn >= maxTurns) {
+        gameActive = false;
+        showMessage(`💀 Time's up! You restored ${score}% of the ecosystem. Total Score: ${totalScore}`, true);
+    }
+    
+    updateConnectionVisuals();
+}
     function isConnected(x1, y1, x2, y2) {
         if (x1 === x2 && y1 === y2) return true;
         
