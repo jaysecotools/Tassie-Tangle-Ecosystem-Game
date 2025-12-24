@@ -1081,107 +1081,134 @@
     // ================
     // GAME LOGIC
     // ================
-    function handleTileClick(x, y) {
-        if (!gameActive) return;
-        
-        const tile = board[y][x];
-        
-        if (tile.type === 'native') {
-            const species = findSpecies(tile.element.textContent);
-            let isFullyConnected = false;
+function handleTileClick(x, y) {
+    if (!gameActive) return;
+    
+    const tile = board[y][x];
+    const prevSelected = selectedTile;
+    
+    // If clicking the same tile again, deselect it
+    if (selectedTile && selectedTile.x === x && selectedTile.y === y) {
+        selectedTile.element.classList.remove('selected');
+        selectedTile = null;
+        showMessage("Tile deselected.", false);
+        return;
+    }
+    
+    // If we already have a selected plant AND click on a water/sun resource, try to connect
+    if (prevSelected && (tile.type === 'water' || tile.type === 'sun')) {
+        // Check if previous selection was a plant
+        if (board[prevSelected.y][prevSelected.x].type === 'native') {
+            const plantSpecies = findSpecies(board[prevSelected.y][prevSelected.x].element.textContent);
             
-            if (species.needs.includes('water')) {
-                for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                    for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                        if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
-                            isFullyConnected = true;
-                            break;
-                        }
-                    }
+            if (plantSpecies.needs.includes(tile.type)) {
+                if (connectTiles(prevSelected.x, prevSelected.y, x, y)) {
+                    // Success! Remove selection from plant
+                    prevSelected.element.classList.remove('selected');
+                    selectedTile = null;
                 }
-            }
-            
-            if (isFullyConnected && species.needs.includes('sun')) {
-                for (let ty = 0; ty < BOARD_SIZE; ty++) {
-                    for (let tx = 0; tx < BOARD_SIZE; tx++) {
-                        if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
-                            isFullyConnected = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (isFullyConnected) {
+                return; // Don't select the resource tile
+            } else {
                 playSound('error');
-                showMessage("This plant is already fully connected! Try another plant.", true);
+                const needsStr = plantSpecies.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
+                showMessage(`This plant doesn't need ${tile.type}! It needs ${needsStr}.`, true);
+                // Keep plant selected
                 return;
             }
-            
-            if (selectedTile) {
-                selectedTile.element.classList.remove('selected');
-                if (selectedTile.x === x && selectedTile.y === y) {
-                    selectedTile = null;
-                    showMessage("Plant deselected.", false);
-                    return;
+        }
+    }
+    
+    // If we already have a selected plant AND click on a bridge, try to connect through bridge
+    if (prevSelected && tile.type === 'bridge') {
+        if (board[prevSelected.y][prevSelected.x].type === 'native') {
+            const success = connectThroughBridge(prevSelected.x, prevSelected.y, x, y);
+            if (success) {
+                // Connection successful - keep plant selected for potential more connections
+                // Don't change selection
+                return;
+            } else {
+                // Connection failed - keep plant selected
+                selectedTile = prevSelected;
+                selectedTile.element.classList.add('selected');
+                return;
+            }
+        }
+    }
+    
+    // Clear previous selection
+    if (selectedTile) {
+        selectedTile.element.classList.remove('selected');
+    }
+    
+    // Select the clicked tile
+    selectedTile = { 
+        x, y, 
+        element: tile.element,
+        species: tile.type === 'native' ? findSpecies(tile.element.textContent) : null
+    };
+    tile.element.classList.add('selected');
+    
+    // Handle based on tile type
+    if (tile.type === 'native') {
+        const species = selectedTile.species;
+        
+        // Check if already fully connected
+        let isFullyConnected = false;
+        if (species.needs.includes('water')) {
+            for (let ty = 0; ty < BOARD_SIZE; ty++) {
+                for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                    if (board[ty][tx].type === 'water' && isConnected(x, y, tx, ty)) {
+                        isFullyConnected = true;
+                        break;
+                    }
                 }
             }
-            
-            selectedTile = { 
-                x, y, 
-                element: tile.element,
-                species: findSpecies(tile.element.textContent)
-            };
-            tile.element.classList.add('selected');
-            
+        }
+        
+        if (isFullyConnected && species.needs.includes('sun')) {
+            for (let ty = 0; ty < BOARD_SIZE; ty++) {
+                for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                    if (board[ty][tx].type === 'sun' && isConnected(x, y, tx, ty)) {
+                        isFullyConnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (isFullyConnected) {
+            playSound('error');
+            showMessage("This plant is already fully connected! Try another plant.", true);
+        } else {
             playSound('select');
-            
-            const speciesName = selectedTile.species.name;
+            const speciesName = species.name;
             if (!discoveredSpecies.includes(speciesName)) {
                 discoveredSpecies.push(speciesName);
                 renderSpeciesList();
-                showMessage(`Discovered: ${speciesName}! ${selectedTile.species.desc}`, false);
+                showMessage(`Discovered: ${speciesName}! ${species.desc}`, false);
             } else {
-                const needsStr = selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
+                const needsStr = species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
                 showMessage(`Selected: ${speciesName}. Needs: ${needsStr}.`, false);
             }
-        } 
-        else if (selectedTile && (tile.type === 'water' || tile.type === 'sun')) {
-            if (selectedTile.species.needs.includes(tile.type)) {
-                if (connectTiles(selectedTile.x, selectedTile.y, x, y)) {
-                    selectedTile.element.classList.remove('selected');
-                    selectedTile = null;
-                }
-            } else {
-                playSound('error');
-                const needsStr = selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
-                showMessage(`This plant doesn't need ${tile.type}! It needs ${needsStr}.`, true);
-            }
         }
-        else if (selectedTile && tile.type === 'bridge') {
-            if (connectThroughBridge(selectedTile.x, selectedTile.y, x, y)) {
-                selectedTile.element.classList.remove('selected');
-                selectedTile = null;
-            }
-        }
-        else if (selectedTile && tile.type === 'empty') {
-            playSound('error');
-            const needsStr = selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' or ');
-            showMessage(`First connect to a needed resource (${needsStr})`, true);
-        }
-        else if (selectedTile && tile.type === 'weed') {
-            playSound('weed');
-            showMessage(`Cannot connect through weeds! Clear them first.`, true);
-        }
-        else if (selectedTile && tile.type === 'path') {
-            showMessage(`Select a resource to connect to (💧 or ☀️)`, false);
-        }
-        else if (tile.type === 'water' || tile.type === 'sun') {
-            showMessage(`First select a plant that needs ${tile.type}`, false);
-        }
+    } 
+    else if (tile.type === 'water' || tile.type === 'sun') {
+        // If we get here, it means we selected a resource without a plant selected first
+        showMessage(`Selected ${tile.type} source. Now select a plant that needs it.`, false);
     }
-
-    function connectTiles(x1, y1, x2, y2) {
+    else if (tile.type === 'bridge') {
+        showMessage(`Selected bridge. Now select a plant to connect through it.`, false);
+    }
+    else if (tile.type === 'empty') {
+        showMessage(`Selected empty tile. Use Bridge tool here to build a bridge.`, false);
+    }
+    else if (tile.type === 'weed') {
+        showMessage(`Selected weed tile. Use Clear Weeds tool to remove it.`, false);
+    }
+    else if (tile.type === 'path') {
+        showMessage(`Selected path tile.`, false);
+    }
+}    function connectTiles(x1, y1, x2, y2) {
         const path = findConnectionPath(x1, y1, x2, y2);
         if (!path) {
             playSound('error');
@@ -1324,78 +1351,123 @@
         return tileType === 'empty';
     }
 
-    function connectThroughBridge(x1, y1, x2, y2) {
-        if (!selectedTile || board[y2][x2].type !== 'bridge') {
-            showMessage("Select a plant and then click a bridge!", true);
-            return false;
+function connectThroughBridge(x1, y1, x2, y2) {
+    // x1, y1 should be the plant coordinates, x2, y2 should be the bridge coordinates
+    // Check if the source is actually a plant
+    if (board[y1][x1].type !== 'native') {
+        showMessage("Select a plant first, then click a bridge!", true);
+        return false;
+    }
+    
+    // Check if the destination is actually a bridge
+    if (board[y2][x2].type !== 'bridge') {
+        showMessage("This is not a bridge!", true);
+        return false;
+    }
+    
+    // Find a resource connected to this bridge
+    let resourceTile = null;
+    const directions = [
+        {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
+    ];
+    
+    // First, check if bridge is already connected to a resource
+    for (const dir of directions) {
+        const nx = x2 + dir.dx;
+        const ny = y2 + dir.dy;
+        if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+            if (board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
+                resourceTile = {x: nx, y: ny, type: board[ny][nx].type};
+                break;
+            }
         }
-        
-        let resourceTile = null;
-        const directions = [
-            {dx:1,dy:0}, {dx:-1,dy:0}, {dx:0,dy:1}, {dx:0,dy:-1}
-        ];
-        
-        for (const dir of directions) {
-            const nx = x2 + dir.dx;
-            const ny = y2 + dir.dy;
-            if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
-                if (board[ny][nx].type === 'water' || board[ny][nx].type === 'sun') {
-                    resourceTile = {x: nx, y: ny, type: board[ny][nx].type};
+    }
+    
+    // If not directly adjacent, check if bridge is connected to a path that leads to a resource
+    if (!resourceTile) {
+        // We need to find any resource that's connected to this bridge
+        for (let ty = 0; ty < BOARD_SIZE; ty++) {
+            for (let tx = 0; tx < BOARD_SIZE; tx++) {
+                if ((board[ty][tx].type === 'water' || board[ty][tx].type === 'sun') && 
+                    isConnected(x2, y2, tx, ty)) {
+                    resourceTile = {x: tx, y: ty, type: board[ty][tx].type};
                     break;
                 }
             }
+            if (resourceTile) break;
         }
-        
-        if (!resourceTile) {
-            showMessage("This bridge isn't connected to a resource!", true);
-            return false;
-        }
-        
-        if (!selectedTile.species.needs.includes(resourceTile.type)) {
-            const needsStr = selectedTile.species.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
-            showMessage(`This plant doesn't need ${resourceTile.type}! It needs ${needsStr}.`, true);
-            return false;
-        }
-        
-        const path1 = findConnectionPath(x1, y1, x2, y2);
-        const path2 = findConnectionPath(x2, y2, resourceTile.x, resourceTile.y);
-        
-        if (path1 && path2) {
-            connections.push(`${x1},${y1}-${resourceTile.x},${resourceTile.y}`);
-            
-            path1.forEach(({x, y}, i) => {
-                setTimeout(() => {
-                    if (board[y][x].type === 'empty') {
-                        convertTile(x, y, 'path', '🌱');
-                    }
-                }, i * 100);
-            });
-            
-            path2.forEach(({x, y}, i) => {
-                setTimeout(() => {
-                    if (board[y][x].type === 'empty') {
-                        convertTile(x, y, 'path', '🌱');
-                    }
-                }, (path1.length + i) * 100);
-            });
-            
-            setTimeout(() => {
-                board[y1][x1].connected = true;
-                board[resourceTile.y][resourceTile.x].connected = true;
-                
-                checkPlantNeeds(x1, y1);
-                showMessage("Connected through bridge!", false);
-                updateConnectionVisuals();
-                checkGameState();
-            }, (path1.length + path2.length) * 100 + 200);
-            
-            return true;
-        }
-        
-        showMessage("Cannot connect through this bridge! Path is blocked.", true);
+    }
+    
+    if (!resourceTile) {
+        showMessage("This bridge isn't connected to any resource!", true);
         return false;
     }
-
+    
+    // Check if the plant needs this type of resource
+    const plantSpecies = findSpecies(board[y1][x1].element.textContent);
+    if (!plantSpecies.needs.includes(resourceTile.type)) {
+        const needsStr = plantSpecies.needs.map(n => n === 'water' ? '💧' : '☀️').join(' and ');
+        showMessage(`This plant doesn't need ${resourceTile.type}! It needs ${needsStr}.`, true);
+        return false;
+    }
+    
+    // Check if plant is already connected to this resource
+    if (isConnected(x1, y1, resourceTile.x, resourceTile.y)) {
+        showMessage("This plant is already connected to that resource!", true);
+        return false;
+    }
+    
+    // Find paths from plant to bridge and from bridge to resource
+    const path1 = findConnectionPath(x1, y1, x2, y2);
+    const path2 = findConnectionPath(x2, y2, resourceTile.x, resourceTile.y);
+    
+    if (path1 && path2) {
+        const connectionKey = `${x1},${y1}-${resourceTile.x},${resourceTile.y}`;
+        const reverseKey = `${resourceTile.x},${resourceTile.y}-${x1},${y1}`;
+        
+        if (connections.includes(connectionKey) || connections.includes(reverseKey)) {
+            playSound('error');
+            showMessage("These are already connected!", true);
+            return false;
+        }
+        
+        connections.push(connectionKey);
+        
+        // Create path from plant to bridge
+        path1.forEach(({x, y}, i) => {
+            setTimeout(() => {
+                if (board[y][x].type === 'empty') {
+                    convertTile(x, y, 'path', '🌱');
+                }
+            }, i * 100);
+        });
+        
+        // Create path from bridge to resource
+        path2.forEach(({x, y}, i) => {
+            setTimeout(() => {
+                if (board[y][x].type === 'empty') {
+                    convertTile(x, y, 'path', '🌱');
+                }
+            }, (path1.length + i) * 100);
+        });
+        
+        setTimeout(() => {
+            board[y1][x1].connected = true;
+            board[resourceTile.y][resourceTile.x].connected = true;
+            
+            checkPlantNeeds(x1, y1);
+            showMessage("Connected through bridge!", false);
+            updateConnectionVisuals();
+            checkGameState();
+            playSound('connect');
+        }, (path1.length + path2.length) * 100 + 200);
+        
+        return true;
+    }
+    
+    showMessage("Cannot connect through this bridge! Path is blocked.", true);
+    return false;
+}
     function checkPlantNeeds(x, y) {
         if (board[y][x].type !== 'native') return;
         
